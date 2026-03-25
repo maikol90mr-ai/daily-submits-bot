@@ -48,32 +48,39 @@ EMOJI_CARRIER_MAP = {
 CUSTOM_EMOJI_CARRIER_MAP: dict[str, str] = {}  # populated via !map command
 
 
+def _parse_deal_date(raw: Optional[str]) -> Optional[str]:
+    """Convert a raw 'M/D' or 'MM/DD' string to an ISO date, or return None."""
+    if not raw:
+        return None
+    try:
+        month, day = (int(p) for p in raw.split("/"))
+        return date(datetime.now(EASTERN).year, month, day).isoformat()
+    except (ValueError, TypeError):
+        return None
+
+
 def parse_submissions(content: str) -> list:
     """
-    Return a list of (amount, carrier_name) for every $amount + carrier emoji
-    pair found in the message. Pairs must have the carrier emoji within ~5
-    characters of the amount. Any $amount without a directly following carrier
-    emoji is ignored.
+    Return a list of (amount, carrier_name, deal_date) for every
+    $amount + carrier emoji pair found in the message.
+    The date (M/D or MM/DD) is captured immediately after the carrier emoji.
+    Any $amount without a directly following carrier emoji is ignored.
     """
     all_carriers = {**EMOJI_CARRIER_MAP, **CUSTOM_EMOJI_CARRIER_MAP}
     emoji_pattern = "|".join(re.escape(e) for e in all_carriers)
-    pattern = r"\$\s*([\d,]+(?:\.\d{1,2})?)\s{0,5}(" + emoji_pattern + ")"
+    pattern = (
+        r"\$\s*([\d,]+(?:\.\d{1,2})?)"   # group 1: amount
+        r"\s{0,5}(" + emoji_pattern + ")" # group 2: carrier emoji
+        r"(?:\s+(\d{1,2}/\d{1,2}))?"      # group 3: optional date after emoji
+    )
     return [
-        (float(m.group(1).replace(",", "")), all_carriers[m.group(2)])
+        (
+            float(m.group(1).replace(",", "")),
+            all_carriers[m.group(2)],
+            _parse_deal_date(m.group(3)),
+        )
         for m in re.finditer(pattern, content)
     ]
-
-
-def extract_date(content: str) -> Optional[str]:
-    match = re.search(r"\b(\d{1,2})[/\-](\d{1,2})\b", content)
-    if not match:
-        return None
-    month, day = int(match.group(1)), int(match.group(2))
-    year = datetime.now(EASTERN).year
-    try:
-        return date(year, month, day).isoformat()
-    except ValueError:
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -281,10 +288,9 @@ async def handle_submission(message: discord.Message):
     if not deals:
         return  # silently ignore — no $amount + carrier emoji pair found
 
-    deal_date = extract_date(content)
     posted_at = datetime.now(EASTERN).isoformat()
 
-    for i, (amount, carrier) in enumerate(deals):
+    for i, (amount, carrier, deal_date) in enumerate(deals):
         insert_submission(
             discord_id=str(message.author.id),
             username=message.author.display_name,
@@ -499,6 +505,98 @@ async def cmd_map(ctx: commands.Context, emoji: Optional[str] = None, *, carrier
     await ctx.send(f"✅ Mapped {emoji} → **{carrier_name}**")
 
 
+def _fmt_effective_date(iso: str) -> str:
+    """Format YYYY-MM-DD as M/D for display."""
+    d = date.fromisoformat(iso)
+    return f"{d.month}/{d.day}"
+
+
+def _build_effective_list(rows, title: str) -> str:
+    if not rows:
+        return f"**{title}**\nNo deals found."
+    lines = [f"**{title}**"]
+    for row in rows:
+        lines.append(
+            f"- {row['username']} — {fmt_money(row['ap_amount'])} {row['carriers']} — effective {_fmt_effective_date(row['deal_date'])}"
+        )
+    return "\n".join(lines)
+
+
+@bot.command(name="upcoming")
+@stats_only()
+async def cmd_upcoming(ctx: commands.Context):
+    today = datetime.now(EASTERN).date()
+    end = (today + timedelta(days=7)).isoformat()
+    today_iso = today.isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT username, ap_amount, carriers, deal_date
+            FROM submissions
+            WHERE deal_date BETWEEN %s AND %s AND deleted=0
+            ORDER BY deal_date ASC
+            """,
+            (today_iso, end),
+        ).fetchall()
+    await ctx.send(_build_effective_list(rows, "📅 Upcoming Effective Dates (Next 7 Days)"))
+
+
+@bot.command(name="pending")
+@stats_only()
+async def cmd_pending(ctx: commands.Context):
+    today_iso = datetime.now(EASTERN).date().isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT username, ap_amount, carriers, deal_date
+            FROM submissions
+            WHERE deal_date > %s AND deleted=0
+            ORDER BY deal_date ASC
+            """,
+            (today_iso,),
+        ).fetchall()
+    await ctx.send(_build_effective_list(rows, "⏳ All Pending Effective Dates"))
+
+
+@bot.command(name="effective")
+@stats_only()
+async def cmd_effective(ctx: commands.Context, *, arg: Optional[str] = None):
+    if not arg:
+        await ctx.send("Usage: `!effective today` or `!effective @agent`")
+        return
+    if arg.strip().lower() == "today":
+        today_iso = datetime.now(EASTERN).date().isoformat()
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT username, ap_amount, carriers, deal_date
+                FROM submissions
+                WHERE deal_date = %s AND deleted=0
+                ORDER BY deal_date ASC
+                """,
+                (today_iso,),
+            ).fetchall()
+        await ctx.send(_build_effective_list(rows, f"📅 Effective Today ({today_iso})"))
+    else:
+        try:
+            member = await commands.MemberConverter().convert(ctx, arg.strip())
+        except commands.MemberNotFound:
+            await ctx.send("Usage: `!effective today` or `!effective @agent`")
+            return
+        today_iso = datetime.now(EASTERN).date().isoformat()
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT username, ap_amount, carriers, deal_date
+                FROM submissions
+                WHERE discord_id=%s AND deal_date >= %s AND deleted=0
+                ORDER BY deal_date ASC
+                """,
+                (str(member.id), today_iso),
+            ).fetchall()
+        await ctx.send(_build_effective_list(rows, f"📅 {member.display_name}'s Upcoming Effective Dates"))
+
+
 @bot.command(name="help")
 @stats_only()
 async def cmd_help(ctx: commands.Context):
@@ -510,7 +608,11 @@ async def cmd_help(ctx: commands.Context):
         "`!me` — your personal stats\n"
         "`!stats @agent` — any agent's breakdown\n"
         "`!carriers` — team AP split by carrier\n"
-        "`!top` — all-time leaderboard\n\n"
+        "`!top` — all-time leaderboard\n"
+        "`!upcoming` — effective dates in the next 7 days\n"
+        "`!pending` — all future effective dates\n"
+        "`!effective today` — deals going effective today\n"
+        "`!effective @agent` — an agent's upcoming effective dates\n\n"
         "**Admin only:**\n"
         "`!delete <message_link>` — remove a submission\n"
         "`!fix @agent $amount` — correct a submission amount\n"
