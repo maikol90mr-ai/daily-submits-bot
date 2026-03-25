@@ -318,67 +318,157 @@ def stats_only():
     return commands.check(predicate)
 
 
-@bot.command(name="recap")
-@stats_only()
-async def cmd_recap(ctx: commands.Context):
-    today = datetime.now(EASTERN).date().isoformat()
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE substr(posted_at,1,10)=%s AND deleted=0",
-            (today,),
-        ).fetchone()
-    total = row["total"] or 0
-    deals = row["deals"] or 0
-    await ctx.send(f"**Today's Recap ({today})**\nTotal AP: {fmt_money(total)} | Deals: {deals}")
+def _fmt_effective_date(iso: str) -> str:
+    d = date.fromisoformat(iso)
+    return f"{d.month}/{d.day}"
 
+
+def _build_effective_list(rows, title: str) -> str:
+    if not rows:
+        return f"**{title}**\nNo deals found."
+    lines = [f"**{title}**"]
+    for row in rows:
+        lines.append(
+            f"- {row['username']} — {fmt_money(row['ap_amount'])} {row['carriers']} — effective {_fmt_effective_date(row['deal_date'])}"
+        )
+    return "\n".join(lines)
+
+
+# --- !daily ---
+
+@bot.command(name="daily")
+@stats_only()
+async def cmd_daily(ctx: commands.Context):
+    today = datetime.now(EASTERN).date().isoformat()
+    if is_admin(ctx):
+        with get_conn() as conn:
+            summary = conn.execute(
+                "SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE substr(posted_at,1,10)=%s AND deleted=0",
+                (today,),
+            ).fetchone()
+            rows = conn.execute(
+                """
+                SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
+                FROM submissions
+                WHERE substr(posted_at,1,10)=%s AND deleted=0
+                GROUP BY discord_id, username ORDER BY total DESC
+                """,
+                (today,),
+            ).fetchall()
+        total = summary["total"] or 0
+        deals = summary["deals"] or 0
+        msg = f"**Team Daily ({today})**\nTotal AP: {fmt_money(total)} | Deals: {deals}\n\n"
+        msg += build_leaderboard(rows, "Today's Leaderboard")
+    else:
+        discord_id = str(ctx.author.id)
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE discord_id=%s AND substr(posted_at,1,10)=%s AND deleted=0",
+                (discord_id, today),
+            ).fetchone()
+        total = row["total"] or 0
+        deals = row["deals"] or 0
+        msg = f"**Your Daily ({today})**\nTotal AP: {fmt_money(total)} | Deals: {deals}"
+    await ctx.send(msg)
+
+
+# --- !week ---
 
 @bot.command(name="week")
 @stats_only()
 async def cmd_week(ctx: commands.Context):
     start, end = week_bounds()
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
-            FROM submissions
-            WHERE substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0
-            GROUP BY discord_id, username ORDER BY total DESC
-            """,
-            (start, end),
-        ).fetchall()
-    await ctx.send(build_leaderboard(rows, f"Weekly Leaderboard ({start} → {end})"))
+    if is_admin(ctx):
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
+                FROM submissions
+                WHERE substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0
+                GROUP BY discord_id, username ORDER BY total DESC
+                """,
+                (start, end),
+            ).fetchall()
+        await ctx.send(build_leaderboard(rows, f"Weekly Leaderboard ({start} → {end})"))
+    else:
+        discord_id = str(ctx.author.id)
+        with get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions
+                WHERE discord_id=%s AND substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0
+                """,
+                (discord_id, start, end),
+            ).fetchone()
+        total = row["total"] or 0
+        deals = row["deals"] or 0
+        await ctx.send(f"**Your Week ({start} → {end})**\nTotal AP: {fmt_money(total)} | Deals: {deals}")
 
+
+# --- !month ---
 
 @bot.command(name="month")
 @stats_only()
 async def cmd_month(ctx: commands.Context):
     start, end = month_bounds()
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
-            FROM submissions
-            WHERE substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0
-            GROUP BY discord_id, username ORDER BY total DESC
-            """,
-            (start, end),
-        ).fetchall()
-    await ctx.send(build_leaderboard(rows, f"Month-to-Date Leaderboard ({start} → {end})"))
+    if is_admin(ctx):
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
+                FROM submissions
+                WHERE substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0
+                GROUP BY discord_id, username ORDER BY total DESC
+                """,
+                (start, end),
+            ).fetchall()
+        await ctx.send(build_leaderboard(rows, f"Month-to-Date Leaderboard ({start} → {end})"))
+    else:
+        discord_id = str(ctx.author.id)
+        with get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions
+                WHERE discord_id=%s AND substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0
+                """,
+                (discord_id, start, end),
+            ).fetchone()
+        total = row["total"] or 0
+        deals = row["deals"] or 0
+        await ctx.send(f"**Your Month ({start} → {end})**\nTotal AP: {fmt_money(total)} | Deals: {deals}")
 
+
+# --- !me ---
 
 @bot.command(name="me")
 @stats_only()
 async def cmd_me(ctx: commands.Context):
     discord_id = str(ctx.author.id)
     with get_conn() as conn:
-        row = conn.execute(
+        summary = conn.execute(
             "SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE discord_id=%s AND deleted=0",
             (discord_id,),
         ).fetchone()
-    total = row["total"] or 0
-    deals = row["deals"] or 0
-    await ctx.send(f"**{ctx.author.display_name}'s Stats**\nTotal AP: {fmt_money(total)} | Deals: {deals}")
+        carrier_rows = conn.execute(
+            """
+            SELECT carriers, SUM(ap_amount) as total, COUNT(*) as deals
+            FROM submissions WHERE discord_id=%s AND deleted=0
+            GROUP BY carriers ORDER BY total DESC
+            """,
+            (discord_id,),
+        ).fetchall()
+    total = summary["total"] or 0
+    deals = summary["deals"] or 0
+    lines = [f"**{ctx.author.display_name}'s All-Time Stats**",
+             f"Total AP: {fmt_money(total)} | Deals: {deals}"]
+    if carrier_rows:
+        lines.append("**By Carrier:**")
+        for r in carrier_rows:
+            lines.append(f"• {r['carriers']} — {fmt_money(r['total'])} ({r['deals']} deal{'s' if r['deals'] != 1 else ''})")
+    await ctx.send("\n".join(lines))
 
+
+# --- !stats @agent ---
 
 @bot.command(name="stats")
 @stats_only()
@@ -397,9 +487,33 @@ async def cmd_stats(ctx: commands.Context, member: discord.Member = None):
     await ctx.send(f"**{member.display_name}'s Stats**\nTotal AP: {fmt_money(total)} | Deals: {deals}")
 
 
+# --- !top (admin only) ---
+
+@bot.command(name="top")
+@stats_only()
+async def cmd_top(ctx: commands.Context):
+    if not is_admin(ctx):
+        await ctx.send("⛔ Admin only.")
+        return
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
+            FROM submissions WHERE deleted=0
+            GROUP BY discord_id, username ORDER BY total DESC
+            """
+        ).fetchall()
+    await ctx.send(build_leaderboard(rows, "All-Time Leaderboard"))
+
+
+# --- !carriers (admin only) ---
+
 @bot.command(name="carriers")
 @stats_only()
 async def cmd_carriers(ctx: commands.Context):
+    if not is_admin(ctx):
+        await ctx.send("⛔ Admin only.")
+        return
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT carriers, SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE deleted=0 GROUP BY carriers ORDER BY total DESC"
@@ -413,19 +527,137 @@ async def cmd_carriers(ctx: commands.Context):
     await ctx.send("\n".join(lines))
 
 
-@bot.command(name="top")
+# --- !upcoming (own deals for agents, own deals for admins too — use !allupcoming for team) ---
+
+@bot.command(name="upcoming")
 @stats_only()
-async def cmd_top(ctx: commands.Context):
+async def cmd_upcoming(ctx: commands.Context):
+    today = datetime.now(EASTERN).date()
+    end = (today + timedelta(days=7)).isoformat()
+    today_iso = today.isoformat()
+    discord_id = str(ctx.author.id)
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
-            FROM submissions WHERE deleted=0
-            GROUP BY discord_id, username ORDER BY total DESC
-            """
+            SELECT username, ap_amount, carriers, deal_date
+            FROM submissions
+            WHERE discord_id=%s AND deal_date BETWEEN %s AND %s AND deleted=0
+            ORDER BY deal_date ASC
+            """,
+            (discord_id, today_iso, end),
         ).fetchall()
-    await ctx.send(build_leaderboard(rows, "All-Time Leaderboard"))
+    await ctx.send(_build_effective_list(rows, "📅 Your Upcoming Effective Dates (Next 7 Days)"))
 
+
+# --- !pending (own deals only) ---
+
+@bot.command(name="pending")
+@stats_only()
+async def cmd_pending(ctx: commands.Context):
+    today_iso = datetime.now(EASTERN).date().isoformat()
+    discord_id = str(ctx.author.id)
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT username, ap_amount, carriers, deal_date
+            FROM submissions
+            WHERE discord_id=%s AND deal_date > %s AND deleted=0
+            ORDER BY deal_date ASC
+            """,
+            (discord_id, today_iso),
+        ).fetchall()
+    await ctx.send(_build_effective_list(rows, "⏳ Your Pending Effective Dates"))
+
+
+# --- !effective today / !effective @agent ---
+
+@bot.command(name="effective")
+@stats_only()
+async def cmd_effective(ctx: commands.Context, *, arg: Optional[str] = None):
+    if not arg:
+        await ctx.send("Usage: `!effective today` or `!effective @agent`")
+        return
+    if arg.strip().lower() == "today":
+        today_iso = datetime.now(EASTERN).date().isoformat()
+        discord_id = str(ctx.author.id)
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT username, ap_amount, carriers, deal_date
+                FROM submissions
+                WHERE discord_id=%s AND deal_date = %s AND deleted=0
+                ORDER BY deal_date ASC
+                """,
+                (discord_id, today_iso),
+            ).fetchall()
+        await ctx.send(_build_effective_list(rows, f"📅 Your Deals Effective Today ({today_iso})"))
+    else:
+        try:
+            member = await commands.MemberConverter().convert(ctx, arg.strip())
+        except commands.MemberNotFound:
+            await ctx.send("Usage: `!effective today` or `!effective @agent`")
+            return
+        today_iso = datetime.now(EASTERN).date().isoformat()
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT username, ap_amount, carriers, deal_date
+                FROM submissions
+                WHERE discord_id=%s AND deal_date >= %s AND deleted=0
+                ORDER BY deal_date ASC
+                """,
+                (str(member.id), today_iso),
+            ).fetchall()
+        await ctx.send(_build_effective_list(rows, f"📅 {member.display_name}'s Upcoming Effective Dates"))
+
+
+# --- !allupcoming (admin only) ---
+
+@bot.command(name="allupcoming")
+@stats_only()
+async def cmd_allupcoming(ctx: commands.Context):
+    if not is_admin(ctx):
+        await ctx.send("⛔ Admin only.")
+        return
+    today = datetime.now(EASTERN).date()
+    end = (today + timedelta(days=7)).isoformat()
+    today_iso = today.isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT username, ap_amount, carriers, deal_date
+            FROM submissions
+            WHERE deal_date BETWEEN %s AND %s AND deleted=0
+            ORDER BY deal_date ASC
+            """,
+            (today_iso, end),
+        ).fetchall()
+    await ctx.send(_build_effective_list(rows, "📅 All Upcoming Effective Dates (Next 7 Days)"))
+
+
+# --- !allpending (admin only) ---
+
+@bot.command(name="allpending")
+@stats_only()
+async def cmd_allpending(ctx: commands.Context):
+    if not is_admin(ctx):
+        await ctx.send("⛔ Admin only.")
+        return
+    today_iso = datetime.now(EASTERN).date().isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT username, ap_amount, carriers, deal_date
+            FROM submissions
+            WHERE deal_date > %s AND deleted=0
+            ORDER BY deal_date ASC
+            """,
+            (today_iso,),
+        ).fetchall()
+    await ctx.send(_build_effective_list(rows, "⏳ All Agents — Pending Effective Dates"))
+
+
+# --- !wipedata (admin only) ---
 
 @bot.command(name="wipedata")
 @stats_only()
@@ -442,6 +674,8 @@ async def cmd_wipedata(ctx: commands.Context, confirm: Optional[str] = None):
     await ctx.send(f"🗑️ Wiped {count} row{'s' if count != 1 else ''} from submissions.")
 
 
+# --- !delete (admin only) ---
+
 @bot.command(name="delete")
 @stats_only()
 async def cmd_delete(ctx: commands.Context, message_link: Optional[str] = None):
@@ -451,7 +685,6 @@ async def cmd_delete(ctx: commands.Context, message_link: Optional[str] = None):
     if not message_link:
         await ctx.send("Usage: `!delete <message_link>`")
         return
-    # Extract message ID from link: .../channels/guild/channel/message_id
     parts = message_link.rstrip("/").split("/")
     if not parts:
         await ctx.send("Invalid message link.")
@@ -463,6 +696,8 @@ async def cmd_delete(ctx: commands.Context, message_link: Optional[str] = None):
     else:
         await ctx.send(f"⚠️ No active submission found for message ID `{message_id}`.")
 
+
+# --- !fix (admin only) ---
 
 @bot.command(name="fix")
 @stats_only()
@@ -486,6 +721,8 @@ async def cmd_fix(ctx: commands.Context, member: Optional[discord.Member] = None
         await ctx.send(f"⚠️ No submission found for {member.display_name}.")
 
 
+# --- !map (admin only) ---
+
 @bot.command(name="map")
 @stats_only()
 async def cmd_map(ctx: commands.Context, emoji: Optional[str] = None, *, carrier_name: Optional[str] = None):
@@ -505,119 +742,42 @@ async def cmd_map(ctx: commands.Context, emoji: Optional[str] = None, *, carrier
     await ctx.send(f"✅ Mapped {emoji} → **{carrier_name}**")
 
 
-def _fmt_effective_date(iso: str) -> str:
-    """Format YYYY-MM-DD as M/D for display."""
-    d = date.fromisoformat(iso)
-    return f"{d.month}/{d.day}"
-
-
-def _build_effective_list(rows, title: str) -> str:
-    if not rows:
-        return f"**{title}**\nNo deals found."
-    lines = [f"**{title}**"]
-    for row in rows:
-        lines.append(
-            f"- {row['username']} — {fmt_money(row['ap_amount'])} {row['carriers']} — effective {_fmt_effective_date(row['deal_date'])}"
-        )
-    return "\n".join(lines)
-
-
-@bot.command(name="upcoming")
-@stats_only()
-async def cmd_upcoming(ctx: commands.Context):
-    today = datetime.now(EASTERN).date()
-    end = (today + timedelta(days=7)).isoformat()
-    today_iso = today.isoformat()
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT username, ap_amount, carriers, deal_date
-            FROM submissions
-            WHERE deal_date BETWEEN %s AND %s AND deleted=0
-            ORDER BY deal_date ASC
-            """,
-            (today_iso, end),
-        ).fetchall()
-    await ctx.send(_build_effective_list(rows, "📅 Upcoming Effective Dates (Next 7 Days)"))
-
-
-@bot.command(name="pending")
-@stats_only()
-async def cmd_pending(ctx: commands.Context):
-    today_iso = datetime.now(EASTERN).date().isoformat()
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT username, ap_amount, carriers, deal_date
-            FROM submissions
-            WHERE deal_date > %s AND deleted=0
-            ORDER BY deal_date ASC
-            """,
-            (today_iso,),
-        ).fetchall()
-    await ctx.send(_build_effective_list(rows, "⏳ All Pending Effective Dates"))
-
-
-@bot.command(name="effective")
-@stats_only()
-async def cmd_effective(ctx: commands.Context, *, arg: Optional[str] = None):
-    if not arg:
-        await ctx.send("Usage: `!effective today` or `!effective @agent`")
-        return
-    if arg.strip().lower() == "today":
-        today_iso = datetime.now(EASTERN).date().isoformat()
-        with get_conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT username, ap_amount, carriers, deal_date
-                FROM submissions
-                WHERE deal_date = %s AND deleted=0
-                ORDER BY deal_date ASC
-                """,
-                (today_iso,),
-            ).fetchall()
-        await ctx.send(_build_effective_list(rows, f"📅 Effective Today ({today_iso})"))
-    else:
-        try:
-            member = await commands.MemberConverter().convert(ctx, arg.strip())
-        except commands.MemberNotFound:
-            await ctx.send("Usage: `!effective today` or `!effective @agent`")
-            return
-        today_iso = datetime.now(EASTERN).date().isoformat()
-        with get_conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT username, ap_amount, carriers, deal_date
-                FROM submissions
-                WHERE discord_id=%s AND deal_date >= %s AND deleted=0
-                ORDER BY deal_date ASC
-                """,
-                (str(member.id), today_iso),
-            ).fetchall()
-        await ctx.send(_build_effective_list(rows, f"📅 {member.display_name}'s Upcoming Effective Dates"))
-
+# --- !help ---
 
 @bot.command(name="help")
 @stats_only()
 async def cmd_help(ctx: commands.Context):
-    msg = (
-        "**Daily Submits Bot Commands** *(use in #bot-stats)*\n"
-        "`!recap` — today's team total AP + deal count\n"
-        "`!week` — this week's leaderboard\n"
-        "`!month` — month-to-date leaderboard\n"
-        "`!me` — your personal stats\n"
-        "`!stats @agent` — any agent's breakdown\n"
-        "`!carriers` — team AP split by carrier\n"
-        "`!top` — all-time leaderboard\n"
-        "`!upcoming` — effective dates in the next 7 days\n"
-        "`!pending` — all future effective dates\n"
-        "`!effective today` — deals going effective today\n"
-        "`!effective @agent` — an agent's upcoming effective dates\n\n"
-        "**Admin only:**\n"
-        "`!delete <message_link>` — remove a submission\n"
-        "`!fix @agent $amount` — correct a submission amount\n"
-        "`!map <emoji> <CarrierName>` — add a new carrier emoji\n"
-    )
+    if is_admin(ctx):
+        msg = (
+            "**Daily Submits Bot — Admin Commands**\n"
+            "`!daily` — team total AP + deal count + leaderboard for today\n"
+            "`!week` — full team leaderboard this week\n"
+            "`!month` — full team leaderboard this month\n"
+            "`!top` — all-time leaderboard\n"
+            "`!carriers` — team AP split by carrier\n"
+            "`!allupcoming` — all agents' effective dates in next 7 days\n"
+            "`!allpending` — all agents' pending effective dates\n"
+            "`!me` — your own all-time stats\n"
+            "`!stats @agent` — any agent's breakdown\n"
+            "`!effective @agent` — an agent's upcoming effective dates\n\n"
+            "`!delete <link>` — remove a submission\n"
+            "`!fix @agent $amount` — correct a logged AP amount\n"
+            "`!map <emoji> <CarrierName>` — add a carrier emoji\n"
+            "`!wipedata CONFIRM` — wipe all submissions\n"
+        )
+    else:
+        msg = (
+            "**Daily Submits Bot Commands**\n"
+            "`!daily` — your AP + deal count for today\n"
+            "`!week` — your AP + deal count this week\n"
+            "`!month` — your AP + deal count this month\n"
+            "`!me` — your all-time stats + carrier breakdown\n"
+            "`!stats @agent` — any agent's breakdown\n"
+            "`!upcoming` — your effective dates in the next 7 days\n"
+            "`!pending` — your pending effective dates\n"
+            "`!effective today` — your deals going effective today\n"
+            "`!effective @agent` — an agent's upcoming effective dates\n"
+        )
     await ctx.send(msg)
 
 
