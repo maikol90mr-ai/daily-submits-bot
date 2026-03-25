@@ -19,17 +19,12 @@ SUBMIT_CHANNEL = "daily-submits"
 STATS_CHANNEL = "bot-stats"
 EASTERN = ZoneInfo("America/New_York")
 
-# Admin Discord user IDs — replace with real IDs in .env
-def _parse_id(val: Optional[str]) -> int:
-    try:
-        return int(val or "0")
-    except ValueError:
-        return 0
-
-ADMIN_IDS = {
-    _parse_id(os.getenv("ADMIN_ID_MAIKOL")),
-    _parse_id(os.getenv("ADMIN_ID_COLTON")),
-} - {0}
+# Admin Discord user IDs — comma-separated in ADMIN_USER_IDS env var
+ADMIN_IDS: set[str] = {
+    uid.strip()
+    for uid in os.getenv("ADMIN_USER_IDS", "").split(",")
+    if uid.strip()
+}
 
 # ---------------------------------------------------------------------------
 # Carrier detection
@@ -256,7 +251,7 @@ def is_stats_channel(ctx: commands.Context) -> bool:
 
 
 def is_admin(ctx: commands.Context) -> bool:
-    return ctx.author.id in ADMIN_IDS
+    return str(ctx.author.id) in ADMIN_IDS
 
 
 # ---------------------------------------------------------------------------
