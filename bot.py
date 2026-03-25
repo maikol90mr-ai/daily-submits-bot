@@ -426,6 +426,21 @@ async def cmd_top(ctx: commands.Context):
     await ctx.send(build_leaderboard(rows, "All-Time Leaderboard"))
 
 
+@bot.command(name="wipedata")
+@stats_only()
+async def cmd_wipedata(ctx: commands.Context, confirm: Optional[str] = None):
+    if not is_admin(ctx):
+        await ctx.send("⛔ Admin only.")
+        return
+    if confirm != "CONFIRM":
+        await ctx.send("⚠️ This will delete **all submissions**. Type `!wipedata CONFIRM` to proceed.")
+        return
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM submissions")
+        count = cur.rowcount
+    await ctx.send(f"🗑️ Wiped {count} row{'s' if count != 1 else ''} from submissions.")
+
+
 @bot.command(name="delete")
 @stats_only()
 async def cmd_delete(ctx: commands.Context, message_link: Optional[str] = None):
