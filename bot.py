@@ -358,7 +358,7 @@ async def cmd_week(ctx: commands.Context):
             SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
             FROM submissions
             WHERE substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0
-            GROUP BY discord_id ORDER BY total DESC
+            GROUP BY discord_id, username ORDER BY total DESC
             """,
             (start, end),
         ).fetchall()
@@ -375,7 +375,7 @@ async def cmd_month(ctx: commands.Context):
             SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
             FROM submissions
             WHERE substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0
-            GROUP BY discord_id ORDER BY total DESC
+            GROUP BY discord_id, username ORDER BY total DESC
             """,
             (start, end),
         ).fetchall()
@@ -437,7 +437,7 @@ async def cmd_top(ctx: commands.Context):
             """
             SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
             FROM submissions WHERE deleted=0
-            GROUP BY discord_id ORDER BY total DESC
+            GROUP BY discord_id, username ORDER BY total DESC
             """
         ).fetchall()
     await ctx.send(build_leaderboard(rows, "All-Time Leaderboard"))
