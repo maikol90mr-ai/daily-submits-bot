@@ -47,43 +47,27 @@ EMOJI_CARRIER_MAP = {
     "🐄": "Mutual of Omaha",
     "🪖": "Corebridge",
     "👑": "Royal Neighbors",
-}
-
-TEXT_CARRIER_MAP = {
-    "amam": "American Amicable",
+    "🚂": "American Amicable",
 }
 
 CUSTOM_EMOJI_CARRIER_MAP: dict[str, str] = {}  # populated via !map command
 
 
-def detect_carriers(content: str) -> list[str]:
-    found = []
-    seen = set()
-
-    for emoji, name in EMOJI_CARRIER_MAP.items():
-        if emoji in content and name not in seen:
-            found.append(name)
-            seen.add(name)
-
-    for custom_emoji, name in CUSTOM_EMOJI_CARRIER_MAP.items():
-        if custom_emoji in content and name not in seen:
-            found.append(name)
-            seen.add(name)
-
-    lower = content.lower()
-    for keyword, name in TEXT_CARRIER_MAP.items():
-        if keyword in lower and name not in seen:
-            found.append(name)
-            seen.add(name)
-
-    return found
-
-
-def extract_amount(content: str) -> Optional[float]:
-    match = re.search(r"\$\s*([\d,]+(?:\.\d{1,2})?)", content)
+def parse_submission(content: str) -> Optional[tuple]:
+    """
+    Return (amount, carrier_name) where the carrier emoji appears immediately
+    after the dollar amount (within ~5 characters). Any $amount not directly
+    followed by a carrier emoji is ignored.
+    """
+    all_carriers = {**EMOJI_CARRIER_MAP, **CUSTOM_EMOJI_CARRIER_MAP}
+    emoji_pattern = "|".join(re.escape(e) for e in all_carriers)
+    pattern = r"\$\s*([\d,]+(?:\.\d{1,2})?)\s{0,5}(" + emoji_pattern + ")"
+    match = re.search(pattern, content)
     if not match:
         return None
-    return float(match.group(1).replace(",", ""))
+    amount = float(match.group(1).replace(",", ""))
+    carrier = all_carriers[match.group(2)]
+    return amount, carrier
 
 
 def extract_date(content: str) -> Optional[str]:
@@ -299,11 +283,12 @@ async def on_message(message: discord.Message):
 
 async def handle_submission(message: discord.Message):
     content = message.content
-    amount = extract_amount(content)
-    if amount is None:
-        return  # silently ignore
+    result = parse_submission(content)
+    if result is None:
+        return  # silently ignore — no $amount + carrier emoji pair found
 
-    carriers = detect_carriers(content)
+    amount, carrier = result
+    carriers = [carrier]
     deal_date = extract_date(content)
     posted_at = datetime.now(EASTERN).isoformat()
 
