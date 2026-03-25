@@ -53,21 +53,20 @@ EMOJI_CARRIER_MAP = {
 CUSTOM_EMOJI_CARRIER_MAP: dict[str, str] = {}  # populated via !map command
 
 
-def parse_submission(content: str) -> Optional[tuple]:
+def parse_submissions(content: str) -> list:
     """
-    Return (amount, carrier_name) where the carrier emoji appears immediately
-    after the dollar amount (within ~5 characters). Any $amount not directly
-    followed by a carrier emoji is ignored.
+    Return a list of (amount, carrier_name) for every $amount + carrier emoji
+    pair found in the message. Pairs must have the carrier emoji within ~5
+    characters of the amount. Any $amount without a directly following carrier
+    emoji is ignored.
     """
     all_carriers = {**EMOJI_CARRIER_MAP, **CUSTOM_EMOJI_CARRIER_MAP}
     emoji_pattern = "|".join(re.escape(e) for e in all_carriers)
     pattern = r"\$\s*([\d,]+(?:\.\d{1,2})?)\s{0,5}(" + emoji_pattern + ")"
-    match = re.search(pattern, content)
-    if not match:
-        return None
-    amount = float(match.group(1).replace(",", ""))
-    carrier = all_carriers[match.group(2)]
-    return amount, carrier
+    return [
+        (float(m.group(1).replace(",", "")), all_carriers[m.group(2)])
+        for m in re.finditer(pattern, content)
+    ]
 
 
 def extract_date(content: str) -> Optional[str]:
@@ -187,8 +186,8 @@ def insert_submission(
 def delete_submission_by_message_id(message_id: str) -> bool:
     with get_conn() as conn:
         cur = conn.execute(
-            "UPDATE submissions SET deleted=1 WHERE message_id=%s AND deleted=0",
-            (message_id,),
+            "UPDATE submissions SET deleted=1 WHERE message_id LIKE %s AND deleted=0",
+            (f"{message_id}_%",),
         )
         return cur.rowcount > 0
 
@@ -283,25 +282,24 @@ async def on_message(message: discord.Message):
 
 async def handle_submission(message: discord.Message):
     content = message.content
-    result = parse_submission(content)
-    if result is None:
+    deals = parse_submissions(content)
+    if not deals:
         return  # silently ignore — no $amount + carrier emoji pair found
 
-    amount, carrier = result
-    carriers = [carrier]
     deal_date = extract_date(content)
     posted_at = datetime.now(EASTERN).isoformat()
 
-    insert_submission(
-        discord_id=str(message.author.id),
-        username=message.author.display_name,
-        ap_amount=amount,
-        carriers=carriers,
-        deal_date=deal_date,
-        posted_at=posted_at,
-        raw_message=content,
-        message_id=str(message.id),
-    )
+    for i, (amount, carrier) in enumerate(deals):
+        insert_submission(
+            discord_id=str(message.author.id),
+            username=message.author.display_name,
+            ap_amount=amount,
+            carriers=[carrier],
+            deal_date=deal_date,
+            posted_at=posted_at,
+            raw_message=content,
+            message_id=f"{message.id}_{i}",
+        )
 
     await message.add_reaction("🤖")
 
