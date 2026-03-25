@@ -473,6 +473,9 @@ async def cmd_me(ctx: commands.Context):
 @bot.command(name="stats")
 @stats_only()
 async def cmd_stats(ctx: commands.Context, member: discord.Member = None):
+    if not is_admin(ctx):
+        await ctx.send("⛔ Admin only.")
+        return
     if member is None:
         await ctx.send("Usage: `!stats @agent`")
         return
@@ -772,7 +775,6 @@ async def cmd_help(ctx: commands.Context):
             "`!week` — your AP + deal count this week\n"
             "`!month` — your AP + deal count this month\n"
             "`!me` — your all-time stats + carrier breakdown\n"
-            "`!stats @agent` — any agent's breakdown\n"
             "`!upcoming` — your effective dates in the next 7 days\n"
             "`!pending` — your pending effective dates\n"
             "`!effective today` — your deals going effective today\n"
