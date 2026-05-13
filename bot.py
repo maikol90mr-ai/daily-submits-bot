@@ -401,7 +401,7 @@ async def handle_submission(message: discord.Message):
             message_id=f"{message.id}_{i}",
         )
 
-    await message.add_reaction("🤖")
+    await message.add_reaction("🥷")
 
 
 # ---------------------------------------------------------------------------
