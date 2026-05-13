@@ -571,14 +571,33 @@ async def cmd_me(ctx: commands.Context):
 
 @bot.command(name="stats")
 @stats_only()
-async def cmd_stats(ctx: commands.Context, member: discord.Member = None):
+async def cmd_stats(ctx: commands.Context, *, query: str = None):
     if not is_admin(ctx):
         await ctx.send("⛔ Admin only.")
         return
-    if member is None:
-        await ctx.send("Usage: `!stats @agent`")
+    if query is None:
+        await ctx.send("Usage: `!stats @agent` or `!stats firstname`")
         return
-    discord_id = str(member.id)
+
+    # Try resolving as a mention first, then fall back to name search in DB
+    member = None
+    try:
+        member = await commands.MemberConverter().convert(ctx, query.strip())
+        discord_id = str(member.id)
+        display_name = member.display_name
+    except commands.MemberNotFound:
+        # Search by name in submissions table
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT discord_id, username FROM submissions WHERE LOWER(username) LIKE %s AND deleted=0 LIMIT 1",
+                (f"%{query.lower()}%",),
+            ).fetchone()
+        if not row:
+            await ctx.send(f"⚠️ No submissions found for `{query}`.")
+            return
+        discord_id = row["discord_id"]
+        display_name = row["username"]
+
     with get_conn() as conn:
         row = conn.execute(
             "SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE discord_id=%s AND deleted=0",
@@ -586,7 +605,7 @@ async def cmd_stats(ctx: commands.Context, member: discord.Member = None):
         ).fetchone()
     total = row["total"] or 0
     deals = row["deals"] or 0
-    await ctx.send(f"**{member.display_name}'s Stats**\nTotal AP: {fmt_money(total)} | Deals: {deals}")
+    await ctx.send(f"**{display_name}'s Stats**\nTotal AP: {fmt_money(total)} | Deals: {deals}")
 
 
 # --- !top (admin only) ---
