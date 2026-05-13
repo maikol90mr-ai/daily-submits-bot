@@ -47,40 +47,139 @@ EMOJI_CARRIER_MAP = {
 
 CUSTOM_EMOJI_CARRIER_MAP: dict[str, str] = {}  # populated via !map command
 
+# Carrier names agents may type out in text (case-insensitive, whole-word match)
+TEXT_CARRIER_MAP: dict[str, str] = {
+    # Aflac
+    "aflac": "Aflac",
+    # Transamerica
+    "transamerica": "Transamerica",
+    "trans": "Transamerica",
+    "ta": "Transamerica",
+    # Americo
+    "americo": "Americo",
+    # Ethos
+    "ethos": "Ethos",
+    # Mutual of Omaha
+    "mutual of omaha": "Mutual of Omaha",
+    "mutual": "Mutual of Omaha",
+    "moo": "Mutual of Omaha",
+    # Corebridge
+    "corebridge": "Corebridge",
+    "core": "Corebridge",
+    "cb": "Corebridge",
+    # Royal Neighbors
+    "royal neighbors": "Royal Neighbors",
+    "royal": "Royal Neighbors",
+    "rn": "Royal Neighbors",
+    # American Amicable
+    "american amicable": "American Amicable",
+    "amicable": "American Amicable",
+    "amam": "American Amicable",
+    "aa": "American Amicable",
+    # American Home Life
+    "american home life": "American Home Life",
+    "home life": "American Home Life",
+    "ahl": "American Home Life",
+}
+
+# Date pattern: M/D, MM/DD, M/D/YYYY, MM/DD/YYYY, M/DD, etc.
+_DATE_PAT = r"\d{1,2}/\d{1,2}(?:/\d{2,4})?"
+
 
 def _parse_deal_date(raw: Optional[str]) -> Optional[str]:
-    """Convert a raw 'M/D' or 'MM/DD' string to an ISO date, or return None."""
+    """Convert a raw date string (M/D, MM/DD, M/D/YYYY, etc.) to ISO date, or return None."""
     if not raw:
         return None
     try:
-        month, day = (int(p) for p in raw.split("/"))
-        return date(datetime.now(EASTERN).year, month, day).isoformat()
-    except (ValueError, TypeError):
+        parts = raw.split("/")
+        month, day = int(parts[0]), int(parts[1])
+        year = int(parts[2]) if len(parts) > 2 else datetime.now(EASTERN).year
+        if year < 100:
+            year += 2000
+        return date(year, month, day).isoformat()
+    except (ValueError, TypeError, IndexError):
         return None
+
+
+def _extract_date(text: str) -> Optional[str]:
+    """Find the first date-like token in a short text snippet."""
+    m = re.search(_DATE_PAT, text)
+    return _parse_deal_date(m.group(0)) if m else None
 
 
 def parse_submissions(content: str) -> list:
     """
-    Return a list of (amount, carrier_name, deal_date) for every
-    $amount + carrier emoji pair found in the message.
-    The date (M/D or MM/DD) is captured immediately after the carrier emoji.
-    Any $amount without a directly following carrier emoji is ignored.
+    Return a list of (amount, carrier_name, deal_date) for every deal found.
+
+    Handles:
+    - Optional $ prefix:  '$780' or '780'
+    - Carrier as emoji or typed name (case-insensitive)
+    - Date before or after carrier: '5/15 🔺' or '🔺 5/15' or '5/15/2026'
+    - No spaces between amount and emoji: '$663👑'
+    - Multiple deals per message (one per line or separated by newlines)
+
+    A line/segment must contain both an amount AND a carrier signal to count.
     """
-    all_carriers = {**EMOJI_CARRIER_MAP, **CUSTOM_EMOJI_CARRIER_MAP}
-    emoji_pattern = "|".join(re.escape(e) for e in all_carriers)
-    pattern = (
-        r"\$\s*([\d,]+(?:\.\d{1,2})?)"   # group 1: amount
-        r"\s{0,5}(" + emoji_pattern + ")" # group 2: carrier emoji
-        r"(?:\s+(\d{1,2}/\d{1,2}))?"      # group 3: optional date after emoji
+    all_emoji = {**EMOJI_CARRIER_MAP, **CUSTOM_EMOJI_CARRIER_MAP}
+
+    emoji_pat = "|".join(re.escape(e) for e in all_emoji)
+    # Text carrier names, longest first so "mutual of omaha" beats "moo"
+    text_names = sorted(TEXT_CARRIER_MAP, key=len, reverse=True)
+    text_pat = "|".join(re.escape(n) for n in text_names)
+
+    carrier_pat = f"({emoji_pat}|{text_pat})"
+
+    # Amount: optional $, digits with optional commas, optional decimals, optional trailing period
+    amount_pat = r"\$?\s*([\d,]+(?:\.\d{1,2})?)\s*\.?"
+
+    # Full pattern:
+    #   amount  [optional date]  carrier  [optional date]
+    # OR
+    #   [optional date]  carrier  [optional date]  amount  (unusual but possible)
+    # We handle both by doing two passes.
+
+    full_pat = re.compile(
+        amount_pat +
+        r"[ \t]*(?:(" + _DATE_PAT + r")[ \t]*)?" +   # optional date between amount and carrier
+        carrier_pat +
+        r"(?:[ \t]*(" + _DATE_PAT + r"))?",           # optional date after carrier
+        re.IGNORECASE,
     )
-    return [
-        (
-            float(m.group(1).replace(",", "")),
-            all_carriers[m.group(2)],
-            _parse_deal_date(m.group(3)),
-        )
-        for m in re.finditer(pattern, content)
-    ]
+
+    results = []
+    seen_spans = []
+
+    for m in full_pat.finditer(content):
+        raw_amount = m.group(1)
+        date_before = m.group(2)
+        carrier_token = m.group(3)
+        date_after = m.group(4)
+
+        # Skip if this span overlaps a previously matched one (avoid double-counting)
+        start, end = m.span()
+        if any(s <= start < e2 or s <= end <= e2 for s, e2 in seen_spans):
+            continue
+
+        # Must have a real numeric amount
+        try:
+            amount = float(raw_amount.replace(",", ""))
+        except ValueError:
+            continue
+
+        # Resolve carrier name
+        if carrier_token in all_emoji:
+            carrier = all_emoji[carrier_token]
+        else:
+            carrier = TEXT_CARRIER_MAP.get(carrier_token.lower(), carrier_token.title())
+
+        # Prefer date_before; fall back to date_after
+        raw_date = date_before or date_after
+        deal_date = _parse_deal_date(raw_date) if raw_date else None
+
+        results.append((amount, carrier, deal_date))
+        seen_spans.append((start, end))
+
+    return results
 
 
 # ---------------------------------------------------------------------------
