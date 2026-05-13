@@ -629,28 +629,6 @@ async def cmd_carriers(ctx: commands.Context):
     await ctx.send("\n".join(lines))
 
 
-# --- !upcoming (own deals for agents, own deals for admins too — use !allupcoming for team) ---
-
-@bot.command(name="upcoming")
-@stats_only()
-async def cmd_upcoming(ctx: commands.Context):
-    today = datetime.now(EASTERN).date()
-    end = (today + timedelta(days=7)).isoformat()
-    today_iso = today.isoformat()
-    discord_id = str(ctx.author.id)
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT username, ap_amount, carriers, deal_date
-            FROM submissions
-            WHERE discord_id=%s AND deal_date BETWEEN %s AND %s AND deleted=0
-            ORDER BY deal_date ASC
-            """,
-            (discord_id, today_iso, end),
-        ).fetchall()
-    await ctx.send(_build_effective_list(rows, "📅 Your Upcoming Effective Dates (Next 7 Days)"))
-
-
 # --- !pending (own deals only) ---
 
 @bot.command(name="pending")
@@ -714,28 +692,6 @@ async def cmd_effective(ctx: commands.Context, *, arg: Optional[str] = None):
 
 
 # --- !allupcoming (admin only) ---
-
-@bot.command(name="allupcoming")
-@stats_only()
-async def cmd_allupcoming(ctx: commands.Context):
-    if not is_admin(ctx):
-        await ctx.send("⛔ Admin only.")
-        return
-    today = datetime.now(EASTERN).date()
-    end = (today + timedelta(days=7)).isoformat()
-    today_iso = today.isoformat()
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT username, ap_amount, carriers, deal_date
-            FROM submissions
-            WHERE deal_date BETWEEN %s AND %s AND deleted=0
-            ORDER BY deal_date ASC
-            """,
-            (today_iso, end),
-        ).fetchall()
-    await ctx.send(_build_effective_list(rows, "📅 All Upcoming Effective Dates (Next 7 Days)"))
-
 
 # --- !allpending (admin only) ---
 
@@ -857,7 +813,6 @@ async def cmd_help(ctx: commands.Context):
             "`!month` — full team leaderboard this month\n"
             "`!top` — all-time leaderboard\n"
             "`!carriers` — team AP split by carrier\n"
-            "`!allupcoming` — all agents' effective dates in next 7 days\n"
             "`!allpending` — all agents' pending effective dates\n"
             "`!me` — your own all-time stats\n"
             "`!stats @agent` — any agent's breakdown\n"
@@ -874,7 +829,6 @@ async def cmd_help(ctx: commands.Context):
             "`!week` — your AP + deal count this week\n"
             "`!month` — your AP + deal count this month\n"
             "`!me` — your all-time stats + carrier breakdown\n"
-            "`!upcoming` — your effective dates in the next 7 days\n"
             "`!pending` — your pending effective dates\n"
             "`!effective today` — your deals going effective today\n"
             "`!effective @agent` — an agent's upcoming effective dates\n"
