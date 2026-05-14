@@ -678,6 +678,66 @@ async def cmd_allpending(ctx: commands.Context):
     await ctx.send(_build_effective_list(rows, "⏳ All Agents — Pending Effective Dates"))
 
 
+# --- !log (admin only) — manually add a submission ---
+
+@bot.command(name="log")
+@stats_only()
+async def cmd_log(ctx: commands.Context, *, args: Optional[str] = None):
+    if not is_admin(ctx):
+        await ctx.send("⛔ Admin only.")
+        return
+    if not args:
+        await ctx.send(
+            "Usage: `!log @agent $amount <carrier> [M/D]`\n"
+            "Example: `!log @Matt $564 royal 6/11`"
+        )
+        return
+
+    # Parse the member mention first
+    parts = args.split(None, 1)
+    if len(parts) < 2:
+        await ctx.send("Usage: `!log @agent $amount <carrier> [M/D]`")
+        return
+    try:
+        member = await commands.MemberConverter().convert(ctx, parts[0])
+    except commands.MemberNotFound:
+        await ctx.send(f"⚠️ Member not found: {parts[0]}")
+        return
+
+    rest = parts[1]
+    deals = parse_submissions(rest)
+    if not deals:
+        await ctx.send(
+            "⚠️ Couldn't parse a `$amount + carrier` from that. "
+            "Try: `!log @agent $500 royal 6/11`"
+        )
+        return
+
+    posted_at = datetime.now(EASTERN).isoformat()
+    # Use a synthetic message_id so it doesn't collide with real Discord IDs
+    synthetic_id = f"manual_{int(datetime.now(EASTERN).timestamp())}"
+
+    logged = []
+    for i, (amount, carrier, deal_date) in enumerate(deals):
+        insert_submission(
+            discord_id=str(member.id),
+            username=member.display_name,
+            ap_amount=amount,
+            carriers=[carrier],
+            deal_date=deal_date,
+            posted_at=posted_at,
+            raw_message=f"[manual entry by {ctx.author.display_name}] {rest}",
+            message_id=f"{synthetic_id}_{i}",
+        )
+        date_str = f" — effective {_fmt_effective_date(deal_date)}" if deal_date else ""
+        logged.append(f"{fmt_money(amount)} {carrier}{date_str}")
+
+    await ctx.send(
+        f"✅ Logged for **{member.display_name}**:\n" +
+        "\n".join(f"• {line}" for line in logged)
+    )
+
+
 # --- !wipedata (admin only) ---
 
 @bot.command(name="wipedata")
@@ -780,6 +840,7 @@ async def cmd_help(ctx: commands.Context):
         "`!carriers [daily|weekly|monthly|all]` — team AP by carrier (default: all)\n"
         "`!allpending` — all agents' pending effective dates\n"
         "`!stats <name>` — any agent's breakdown\n\n"
+        "`!log @agent $amount <carrier> [M/D]` — manually add a submission\n"
         "`!delete <link>` — remove a submission\n"
         "`!fix @agent $amount` — correct a logged AP amount\n"
         "`!map <emoji> <CarrierName>` — add a carrier emoji\n"
