@@ -143,10 +143,16 @@ def parse_submissions(content: str) -> list:
     #   [optional date]  carrier  [optional date]  amount  (unusual but possible)
     # We handle both by doing two passes.
 
-    # Pass 1: amount → carrier  (e.g. "$500 🔺 5/20")
+    # Allow up to ~30 chars of filler words between amount and carrier
+    # (no newlines, no other digits, no other $ — keeps it on one line and
+    # avoids gobbling a second amount as filler).
+    filler = r"(?:[^\n\r$0-9]{0,30}?)"
+
+    # Pass 1: amount → carrier  (e.g. "$500 🔺 5/20", "751.68 jet royal", "$624 sent to UW AMAM")
     amount_first = re.compile(
         amount_pat +
         r"[ \t]*(?:(" + _DATE_PAT + r")[ \t]*)?" +
+        filler +
         carrier_pat +
         r"(?:[ \t]*(" + _DATE_PAT + r"))?",
         re.IGNORECASE,
@@ -156,6 +162,7 @@ def parse_submissions(content: str) -> list:
     carrier_first = re.compile(
         carrier_pat +
         r"[ \t]*(?:(" + _DATE_PAT + r")[ \t]*)?" +
+        filler +
         amount_pat +
         r"(?:[ \t]*(" + _DATE_PAT + r"))?",
         re.IGNORECASE,
