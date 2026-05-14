@@ -143,44 +143,71 @@ def parse_submissions(content: str) -> list:
     #   [optional date]  carrier  [optional date]  amount  (unusual but possible)
     # We handle both by doing two passes.
 
-    full_pat = re.compile(
+    # Pass 1: amount → carrier  (e.g. "$500 🔺 5/20")
+    amount_first = re.compile(
         amount_pat +
-        r"[ \t]*(?:(" + _DATE_PAT + r")[ \t]*)?" +   # optional date between amount and carrier
+        r"[ \t]*(?:(" + _DATE_PAT + r")[ \t]*)?" +
         carrier_pat +
-        r"(?:[ \t]*(" + _DATE_PAT + r"))?",           # optional date after carrier
+        r"(?:[ \t]*(" + _DATE_PAT + r"))?",
+        re.IGNORECASE,
+    )
+
+    # Pass 2: carrier → amount  (e.g. "👑 $564 6/11")
+    carrier_first = re.compile(
+        carrier_pat +
+        r"[ \t]*(?:(" + _DATE_PAT + r")[ \t]*)?" +
+        amount_pat +
+        r"(?:[ \t]*(" + _DATE_PAT + r"))?",
         re.IGNORECASE,
     )
 
     results = []
     seen_spans = []
 
-    for m in full_pat.finditer(content):
+    def _overlaps(start, end):
+        return any(s < end and start < e for s, e in seen_spans)
+
+    # Pass 1
+    for m in amount_first.finditer(content):
         raw_amount = m.group(1)
         date_before = m.group(2)
         carrier_token = m.group(3)
         date_after = m.group(4)
-
-        # Skip if this span overlaps a previously matched one (avoid double-counting)
         start, end = m.span()
-        if any(s <= start < e2 or s <= end <= e2 for s, e2 in seen_spans):
+        if _overlaps(start, end):
             continue
-
-        # Must have a real numeric amount
         try:
             amount = float(raw_amount.replace(",", ""))
         except ValueError:
             continue
-
-        # Resolve carrier name
         if carrier_token in all_emoji:
             carrier = all_emoji[carrier_token]
         else:
             carrier = TEXT_CARRIER_MAP.get(carrier_token.lower(), carrier_token.title())
-
-        # Prefer date_before; fall back to date_after
         raw_date = date_before or date_after
         deal_date = _parse_deal_date(raw_date) if raw_date else None
+        results.append((amount, carrier, deal_date))
+        seen_spans.append((start, end))
 
+    # Pass 2 — carrier first
+    for m in carrier_first.finditer(content):
+        carrier_token = m.group(1)
+        date_before = m.group(2)
+        raw_amount = m.group(3)
+        date_after = m.group(4)
+        start, end = m.span()
+        if _overlaps(start, end):
+            continue
+        try:
+            amount = float(raw_amount.replace(",", ""))
+        except ValueError:
+            continue
+        if carrier_token in all_emoji:
+            carrier = all_emoji[carrier_token]
+        else:
+            carrier = TEXT_CARRIER_MAP.get(carrier_token.lower(), carrier_token.title())
+        raw_date = date_before or date_after
+        deal_date = _parse_deal_date(raw_date) if raw_date else None
         results.append((amount, carrier, deal_date))
         seen_spans.append((start, end))
 
