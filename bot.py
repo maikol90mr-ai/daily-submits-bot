@@ -43,6 +43,7 @@ EMOJI_CARRIER_MAP = {
     "🪖": "Corebridge",
     "👑": "Royal Neighbors",
     "🚂": "American Amicable",
+    "🗽": "Liberty Bankers",
 }
 
 CUSTOM_EMOJI_CARRIER_MAP: dict[str, str] = {}  # populated via !map command
@@ -80,6 +81,10 @@ TEXT_CARRIER_MAP: dict[str, str] = {
     "american home life": "American Home Life",
     "home life": "American Home Life",
     "ahl": "American Home Life",
+    # Liberty Bankers
+    "liberty bankers": "Liberty Bankers",
+    "liberty": "Liberty Bankers",
+    "lbl": "Liberty Bankers",
 }
 
 # Date pattern: M/D, MM/DD, M/D/YYYY, MM/DD/YYYY, M/DD, etc.
