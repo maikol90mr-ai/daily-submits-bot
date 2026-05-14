@@ -35,6 +35,7 @@ EMOJI_CARRIER_MAP = {
     "🏠": "American Home Life",
     "🏡": "American Home Life",
     "🔺": "Transamerica",
+    "🔻": "Transamerica",
     "🏳️‍⚧️": "Transamerica",
     "🦅": "Americo",
     "♻️": "Ethos",
