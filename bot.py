@@ -76,6 +76,7 @@ TEXT_CARRIER_MAP: dict[str, str] = {
     # American Amicable
     "american amicable": "American Amicable",
     "amicable": "American Amicable",
+    "am am": "American Amicable",
     "amam": "American Amicable",
     "aa": "American Amicable",
     # American Home Life
