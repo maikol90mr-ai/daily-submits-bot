@@ -571,18 +571,54 @@ async def cmd_top(ctx: commands.Context):
 
 @bot.command(name="carriers")
 @stats_only()
-async def cmd_carriers(ctx: commands.Context):
+async def cmd_carriers(ctx: commands.Context, period: Optional[str] = None):
     if not is_admin(ctx):
         await ctx.send("⛔ Admin only.")
         return
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT carriers, SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE deleted=0 GROUP BY carriers ORDER BY total DESC"
-        ).fetchall()
-    if not rows:
-        await ctx.send("No data yet.")
+
+    period = (period or "all").lower()
+    today = datetime.now(EASTERN).date()
+
+    if period in ("day", "daily", "today"):
+        start = end = today.isoformat()
+        label = f"Today ({start})"
+    elif period in ("week", "weekly"):
+        start, end = week_bounds()
+        label = f"This Week ({start} → {end})"
+    elif period in ("month", "monthly"):
+        start, end = month_bounds()
+        label = f"This Month ({start} → {end})"
+    elif period in ("all", "alltime", "all-time"):
+        start = end = None
+        label = "All Time"
+    else:
+        await ctx.send("Usage: `!carriers [daily|weekly|monthly|all]`")
         return
-    lines = ["**Team AP by Carrier (All Time)**"]
+
+    with get_conn() as conn:
+        if start and end:
+            rows = conn.execute(
+                """
+                SELECT carriers, SUM(ap_amount) as total, COUNT(*) as deals
+                FROM submissions
+                WHERE deleted=0 AND substr(posted_at,1,10) BETWEEN %s AND %s
+                GROUP BY carriers ORDER BY total DESC
+                """,
+                (start, end),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT carriers, SUM(ap_amount) as total, COUNT(*) as deals
+                FROM submissions WHERE deleted=0
+                GROUP BY carriers ORDER BY total DESC
+                """
+            ).fetchall()
+
+    if not rows:
+        await ctx.send(f"**Team AP by Carrier — {label}**\nNo data yet.")
+        return
+    lines = [f"**Team AP by Carrier — {label}**"]
     for row in rows:
         lines.append(f"• {row['carriers']} — {fmt_money(row['total'])} ({row['deals']} deal{'s' if row['deals'] != 1 else ''})")
     await ctx.send("\n".join(lines))
@@ -709,7 +745,7 @@ async def cmd_help(ctx: commands.Context):
         "`!week` — full team leaderboard this week\n"
         "`!month` — full team leaderboard this month\n"
         "`!top` — all-time leaderboard\n"
-        "`!carriers` — team AP split by carrier\n"
+        "`!carriers [daily|weekly|monthly|all]` — team AP by carrier (default: all)\n"
         "`!allpending` — all agents' pending effective dates\n"
         "`!stats <name>` — any agent's breakdown\n\n"
         "`!delete <link>` — remove a submission\n"
