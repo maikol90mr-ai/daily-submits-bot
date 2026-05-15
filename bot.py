@@ -463,6 +463,22 @@ def _fmt_effective_date(iso: str) -> str:
     return f"{d.month}/{d.day}"
 
 
+async def send_long(ctx: commands.Context, text: str, limit: int = 1990) -> None:
+    if len(text) <= limit:
+        await ctx.send(text)
+        return
+    buf = ""
+    for line in text.split("\n"):
+        if len(buf) + len(line) + 1 > limit:
+            if buf:
+                await ctx.send(buf)
+            buf = line
+        else:
+            buf = f"{buf}\n{line}" if buf else line
+    if buf:
+        await ctx.send(buf)
+
+
 def _build_effective_list(rows, title: str) -> str:
     if not rows:
         return f"**{title}**\nNo deals found."
@@ -501,7 +517,7 @@ async def cmd_daily(ctx: commands.Context):
     deals = summary["deals"] or 0
     msg = f"**Team Daily ({today})**\nTotal AP: {fmt_money(total)} | Deals: {deals}\n\n"
     msg += build_leaderboard(rows, "Today's Leaderboard")
-    await ctx.send(msg)
+    await send_long(ctx, msg)
 
 
 # --- !week ---
@@ -523,7 +539,7 @@ async def cmd_week(ctx: commands.Context):
             """,
             (start, end),
         ).fetchall()
-    await ctx.send(build_leaderboard(rows, f"Weekly Leaderboard ({start} → {end})"))
+    await send_long(ctx, build_leaderboard(rows, f"Weekly Leaderboard ({start} → {end})"))
 
 
 # --- !month ---
@@ -545,7 +561,7 @@ async def cmd_month(ctx: commands.Context):
             """,
             (start, end),
         ).fetchall()
-    await ctx.send(build_leaderboard(rows, f"Month-to-Date Leaderboard ({start} → {end})"))
+    await send_long(ctx, build_leaderboard(rows, f"Month-to-Date Leaderboard ({start} → {end})"))
 
 
 # --- !stats @agent ---
@@ -605,7 +621,7 @@ async def cmd_top(ctx: commands.Context):
             GROUP BY discord_id, username ORDER BY total DESC
             """
         ).fetchall()
-    await ctx.send(build_leaderboard(rows, "All-Time Leaderboard"))
+    await send_long(ctx, build_leaderboard(rows, "All-Time Leaderboard"))
 
 
 # --- !carriers (admin only) ---
@@ -662,7 +678,7 @@ async def cmd_carriers(ctx: commands.Context, period: Optional[str] = None):
     lines = [f"**Team AP by Carrier — {label}**"]
     for row in rows:
         lines.append(f"• {row['carriers']} — {fmt_money(row['total'])} ({row['deals']} deal{'s' if row['deals'] != 1 else ''})")
-    await ctx.send("\n".join(lines))
+    await send_long(ctx, "\n".join(lines))
 
 
 # --- !allpending (admin only) ---
@@ -684,7 +700,7 @@ async def cmd_allpending(ctx: commands.Context):
             """,
             (today_iso,),
         ).fetchall()
-    await ctx.send(_build_effective_list(rows, "⏳ All Agents — Pending Effective Dates"))
+    await send_long(ctx, _build_effective_list(rows, "⏳ All Agents — Pending Effective Dates"))
 
 
 # --- !log (admin only) — manually add a submission ---
