@@ -881,9 +881,9 @@ async def cmd_help(ctx: commands.Context):
         return
     msg = (
         "**Daily Submits Bot — Admin Commands**\n"
-        "`!daily` — team total AP + leaderboard for today\n"
-        "`!week` — full team leaderboard this week\n"
-        "`!month` — full team leaderboard this month\n"
+        "`!daily [M/D]` — team total AP + leaderboard (today, or a specific date)\n"
+        "`!week` — team total AP + full leaderboard this week\n"
+        "`!month` — team total AP + full leaderboard this month\n"
         "`!top` — all-time leaderboard\n"
         "`!carriers [daily|weekly|monthly|all]` — team AP by carrier (default: all)\n"
         "`!allpending` — all agents' pending effective dates\n"
