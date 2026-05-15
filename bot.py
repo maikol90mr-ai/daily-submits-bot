@@ -494,15 +494,22 @@ def _build_effective_list(rows, title: str) -> str:
 
 @bot.command(name="daily")
 @stats_only()
-async def cmd_daily(ctx: commands.Context):
+async def cmd_daily(ctx: commands.Context, target_date: Optional[str] = None):
     if not is_admin(ctx):
         await ctx.send("⛔ Admin only.")
         return
-    today = datetime.now(EASTERN).date().isoformat()
+    if target_date:
+        iso = _parse_deal_date(target_date)
+        if not iso:
+            await ctx.send(f"⚠️ Could not parse date `{target_date}`. Try `M/D`, `MM/DD`, or `M/D/YYYY`.")
+            return
+    else:
+        iso = datetime.now(EASTERN).date().isoformat()
+    is_today = iso == datetime.now(EASTERN).date().isoformat()
     with get_conn() as conn:
         summary = conn.execute(
             "SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE substr(posted_at,1,10)=%s AND deleted=0",
-            (today,),
+            (iso,),
         ).fetchone()
         rows = conn.execute(
             """
@@ -511,12 +518,12 @@ async def cmd_daily(ctx: commands.Context):
             WHERE substr(posted_at,1,10)=%s AND deleted=0
             GROUP BY discord_id, username ORDER BY total DESC
             """,
-            (today,),
+            (iso,),
         ).fetchall()
     total = summary["total"] or 0
     deals = summary["deals"] or 0
-    msg = f"**Team Daily ({today})**\nTotal AP: {fmt_money(total)} | Deals: {deals}\n\n"
-    msg += build_leaderboard(rows, "Today's Leaderboard")
+    msg = f"**Team Daily ({iso})**\nTotal AP: {fmt_money(total)} | Deals: {deals}\n\n"
+    msg += build_leaderboard(rows, "Today's Leaderboard" if is_today else f"Leaderboard ({iso})")
     await send_long(ctx, msg)
 
 
