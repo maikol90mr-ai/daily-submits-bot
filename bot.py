@@ -530,6 +530,10 @@ async def cmd_week(ctx: commands.Context):
         return
     start, end = week_bounds()
     with get_conn() as conn:
+        summary = conn.execute(
+            "SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0",
+            (start, end),
+        ).fetchone()
         rows = conn.execute(
             """
             SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
@@ -539,7 +543,11 @@ async def cmd_week(ctx: commands.Context):
             """,
             (start, end),
         ).fetchall()
-    await send_long(ctx, build_leaderboard(rows, f"Weekly Leaderboard ({start} → {end})"))
+    total = summary["total"] or 0
+    deals = summary["deals"] or 0
+    msg = f"**Team Weekly ({start} → {end})**\nTotal AP: {fmt_money(total)} | Deals: {deals}\n\n"
+    msg += build_leaderboard(rows, "Weekly Leaderboard")
+    await send_long(ctx, msg)
 
 
 # --- !month ---
@@ -552,6 +560,10 @@ async def cmd_month(ctx: commands.Context):
         return
     start, end = month_bounds()
     with get_conn() as conn:
+        summary = conn.execute(
+            "SELECT SUM(ap_amount) as total, COUNT(*) as deals FROM submissions WHERE substr(posted_at,1,10) BETWEEN %s AND %s AND deleted=0",
+            (start, end),
+        ).fetchone()
         rows = conn.execute(
             """
             SELECT username, SUM(ap_amount) as total, COUNT(*) as deals
@@ -561,7 +573,11 @@ async def cmd_month(ctx: commands.Context):
             """,
             (start, end),
         ).fetchall()
-    await send_long(ctx, build_leaderboard(rows, f"Month-to-Date Leaderboard ({start} → {end})"))
+    total = summary["total"] or 0
+    deals = summary["deals"] or 0
+    msg = f"**Team Month-to-Date ({start} → {end})**\nTotal AP: {fmt_money(total)} | Deals: {deals}\n\n"
+    msg += build_leaderboard(rows, "Month-to-Date Leaderboard")
+    await send_long(ctx, msg)
 
 
 # --- !stats @agent ---
