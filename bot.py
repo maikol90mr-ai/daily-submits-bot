@@ -42,6 +42,7 @@ EMOJI_CARRIER_MAP = {
     "🐮": "Mutual of Omaha",
     "🐄": "Mutual of Omaha",
     "🪖": "Corebridge",
+    "🌉": "Corebridge",
     "👑": "Royal Neighbors",
     "🚂": "American Amicable",
     "🗽": "Liberty Bankers",
