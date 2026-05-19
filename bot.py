@@ -131,9 +131,11 @@ def parse_submissions(content: str) -> list:
     all_emoji = {**EMOJI_CARRIER_MAP, **CUSTOM_EMOJI_CARRIER_MAP}
 
     emoji_pat = "|".join(re.escape(e) for e in all_emoji)
-    # Text carrier names, longest first so "mutual of omaha" beats "moo"
+    # Text carrier names, longest first so "mutual of omaha" beats "moo".
+    # Wrap text aliases in \b so short ones (ta, aa, rn, cb, moo) don't match
+    # inside unrelated words like "taken", "called", "broker".
     text_names = sorted(TEXT_CARRIER_MAP, key=len, reverse=True)
-    text_pat = "|".join(re.escape(n) for n in text_names)
+    text_pat = "|".join(r"\b" + re.escape(n) + r"\b" for n in text_names)
 
     carrier_pat = f"({emoji_pat}|{text_pat})"
 
