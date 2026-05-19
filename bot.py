@@ -115,6 +115,10 @@ def _extract_date(text: str) -> Optional[str]:
     return _parse_deal_date(m.group(0)) if m else None
 
 
+_MENTION_PAT = re.compile(r"<(?:@[!&]?|#)\d+>")
+_EMOJI_TAG_PAT = re.compile(r"<a?:[A-Za-z0-9_]+:\d+>")
+
+
 def parse_submissions(content: str) -> list:
     """
     Return a list of (amount, carrier_name, deal_date) for every deal found.
@@ -128,6 +132,11 @@ def parse_submissions(content: str) -> list:
 
     A line/segment must contain both an amount AND a carrier signal to count.
     """
+    # Strip Discord mentions (<@123>, <@!123>, <@&123>, <#123>) and custom
+    # emoji tags (<:name:123>) — their numeric IDs were being parsed as
+    # dollar amounts.
+    content = _MENTION_PAT.sub(" ", content)
+    content = _EMOJI_TAG_PAT.sub(" ", content)
     all_emoji = {**EMOJI_CARRIER_MAP, **CUSTOM_EMOJI_CARRIER_MAP}
 
     emoji_pat = "|".join(re.escape(e) for e in all_emoji)
