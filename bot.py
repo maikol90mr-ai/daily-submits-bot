@@ -179,6 +179,11 @@ def parse_submissions(content: str) -> list:
     def _overlaps(start, end):
         return any(s < end and start < e for s, e in seen_spans)
 
+    # Sanity bounds for a single submission amount.
+    # Real life-insurance AP submissions sit between ~$50 and ~$100k.
+    MIN_AMOUNT = 10
+    MAX_AMOUNT = 1_000_000
+
     # Pass 1
     for m in amount_first.finditer(content):
         raw_amount = m.group(1)
@@ -191,6 +196,8 @@ def parse_submissions(content: str) -> list:
         try:
             amount = float(raw_amount.replace(",", ""))
         except ValueError:
+            continue
+        if amount < MIN_AMOUNT or amount > MAX_AMOUNT:
             continue
         if carrier_token in all_emoji:
             carrier = all_emoji[carrier_token]
@@ -213,6 +220,8 @@ def parse_submissions(content: str) -> list:
         try:
             amount = float(raw_amount.replace(",", ""))
         except ValueError:
+            continue
+        if amount < MIN_AMOUNT or amount > MAX_AMOUNT:
             continue
         if carrier_token in all_emoji:
             carrier = all_emoji[carrier_token]
