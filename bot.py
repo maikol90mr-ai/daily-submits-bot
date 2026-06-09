@@ -71,6 +71,7 @@ TEXT_CARRIER_MAP: dict[str, str] = {
     "core": "Corebridge",
     "cb": "Corebridge",
     "giwl": "Corebridge",
+    "gi wl": "Corebridge",
     # Royal Neighbors
     "royal neighbors": "Royal Neighbors",
     "royal": "Royal Neighbors",
