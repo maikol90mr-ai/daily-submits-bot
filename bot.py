@@ -32,6 +32,7 @@ ADMIN_IDS: set[str] = {
 
 EMOJI_CARRIER_MAP = {
     "🦆": "Aflac",
+    "🦢": "Aflac",
     "🏠": "American Home Life",
     "🏡": "American Home Life",
     "🔺": "Transamerica",
